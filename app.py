@@ -1,6 +1,6 @@
 """ICITIIT 2027 controlled ETL benchmark dashboard.
 
-Compares deterministic rule-based normalization with Groq-hosted LLM normalization on
+Compares deterministic rule-based normalization with xAI Grok-hosted LLM normalization on
 identical, controlled formatting variations. This app does not train a return predictor.
 The pre-corruption canonical records are the ground truth for the controlled task.
 """
@@ -26,7 +26,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-from groq import Groq
+from openai import OpenAI
 
 st.set_page_config(
     page_title="ICITIIT 2027 · ETL Benchmark",
@@ -35,11 +35,11 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Current public Groq developer-plan reference rates when this package was prepared.
-# They are an estimate of service-equivalent cost, NOT necessarily the amount billed.
-DEFAULT_MODEL_ID = "openai/gpt-oss-20b"
-DEFAULT_INPUT_USD_PER_MILLION = 0.075
-DEFAULT_OUTPUT_USD_PER_MILLION = 0.30
+# xAI Grok 4.7 reference rates from xAI model documentation; verify before publication.
+# Service-equivalent token cost is not necessarily the same as account billing.
+DEFAULT_MODEL_ID = "grok-4.7"
+DEFAULT_INPUT_USD_PER_MILLION = 2.00
+DEFAULT_OUTPUT_USD_PER_MILLION = 6.00
 DATA_SOURCE_URL = "https://www.kaggle.com/competitions/retail-return-risk-modeling"
 DATASET_TITLE = "E-Commerce Returns: Who Will Send It Back?"
 APP_VERSION = "1.0.0"
@@ -101,7 +101,7 @@ def get_setting(name: str, default: str = "") -> str:
 
 
 def get_api_key() -> str:
-    return get_setting("GROQ_API_KEY", "")
+    return get_setting("XAI_API_KEY", "")
 
 
 def kaggle_credentials_available() -> bool:
@@ -429,8 +429,8 @@ INPUT RECORDS:
 """
 
 
-def call_groq(
-    client: Groq,
+def call_grok(
+    client: OpenAI,
     batch_rows: list[dict[str, Any]],
     model_id: str,
     input_usd_per_million: float,
@@ -593,7 +593,7 @@ def make_audit_payload() -> dict[str, Any]:
             "uploaded_file_sha256": st.session_state.source_fingerprint,
             "uploaded_rows": st.session_state.source_row_count,
             "eligible_rows": st.session_state.source_eligible_count,
-            "model_id": get_setting("GROQ_MODEL", DEFAULT_MODEL_ID),
+            "model_id": get_setting("XAI_MODEL", DEFAULT_MODEL_ID),
             "random_seed": st.session_state.seed,
             "benchmark_size": st.session_state.benchmark_size,
             "benchmark_built_at_utc": st.session_state.benchmark_built_at,
@@ -633,7 +633,7 @@ def main() -> None:
     init_state()
     st.markdown(CSS, unsafe_allow_html=True)
     api_key = get_api_key()
-    model_id = get_setting("GROQ_MODEL", DEFAULT_MODEL_ID)
+    model_id = get_setting("XAI_MODEL", DEFAULT_MODEL_ID)
 
     st.markdown(
         """<div class="hero-panel">
@@ -650,14 +650,14 @@ def main() -> None:
         st.markdown("### 🔐 Model & API")
         st.caption(f"Model ID: `{model_id}`")
         if api_key:
-            st.success("GROQ_API_KEY detected in secure configuration")
+            st.success("XAI_API_KEY detected in secure configuration")
         else:
-            st.error("GROQ_API_KEY not configured")
-            st.caption("Add it under Streamlit App → Settings → Secrets. Never put the key in GitHub code.")
-        if st.button("Test Groq connection", disabled=not bool(api_key), use_container_width=True):
+            st.error("XAI_API_KEY not configured")
+            st.caption("Add XAI_API_KEY under Streamlit App → Settings → Secrets. Never put the key in GitHub code.")
+        if st.button("Test Grok connection", disabled=not bool(api_key), use_container_width=True):
             try:
-                with st.spinner("Checking Groq API access…"):
-                    model_list = Groq(api_key=api_key).models.list()
+                with st.spinner("Checking xAI API access…"):
+                    model_list = OpenAI(api_key=api_key, base_url="https://api.x.ai/v1").models.list()
                     available_ids = [getattr(m, "id", "") for m in getattr(model_list, "data", [])]
                 if model_id in available_ids:
                     st.success(f"Connection OK; model `{model_id}` is listed.")
@@ -879,12 +879,12 @@ def main() -> None:
                     baseline = evaluate_outputs(st.session_state.gold_records, st.session_state.rule_outputs, keys, "Rule-based")
                     st.metric("Field-level accuracy", f"{baseline['field_accuracy_pct']:.2f}%")
             with rcol2:
-                st.markdown("#### B · Groq-hosted LLM pipeline")
+                st.markdown("#### B · xAI Grok-hosted LLM pipeline")
                 st.write("The selected model receives the same controlled inputs and must return all target fields as structured JSON.")
                 if api_key:
                     st.success(f"API key detected · model `{model_id}`")
                 else:
-                    st.warning("Configure `GROQ_API_KEY` in Streamlit Secrets before calling the model.")
+                    st.warning("Configure `XAI_API_KEY` in Streamlit Secrets before calling the model.")
                 target_options = [n for n in (20, 50, 100) if n <= len(keys)]
                 default_target = min(20, len(keys))
                 target_n = st.select_slider("Run LLM for the first N records", options=target_options, value=default_target, key="llm_target_n")
@@ -892,7 +892,7 @@ def main() -> None:
                 st.caption("Run 20 first, then increase to 50 and 100. The app saves responses in the active Streamlit session; download the audit export after each important run.")
                 if st.button("Run / extend LLM experiment", type="primary", use_container_width=True, disabled=not bool(api_key)):
                     try:
-                        client = Groq(api_key=api_key)
+                        client = OpenAI(api_key=api_key, base_url="https://api.x.ai/v1")
                         target_keys = keys[:int(target_n)]
                         missing_keys = [key for key in target_keys if key not in st.session_state.llm_outputs]
                         if not missing_keys:
@@ -909,7 +909,7 @@ def main() -> None:
                                     batch_rows.append(record)
                                 call_start = time.perf_counter()
                                 try:
-                                    output_map, meta = call_groq(
+                                    output_map, meta = call_grok(
                                         client, batch_rows, model_id,
                                         float(st.session_state.input_rate), float(st.session_state.output_rate),
                                     )
@@ -927,7 +927,7 @@ def main() -> None:
                             st.success(f"Run finished. LLM output is stored for {len(st.session_state.llm_outputs)} records; total logged API errors: {errors}.")
                             st.rerun()
                     except Exception as exc:
-                        st.error(f"Could not initialize the Groq client: {type(exc).__name__}: {str(exc)[:350]}")
+                        st.error(f"Could not initialize the xAI client: {type(exc).__name__}: {str(exc)[:350]}")
 
             st.markdown("---")
             st.markdown("#### Run status")
@@ -1062,7 +1062,7 @@ def main() -> None:
             {"Component": "Analysis task", "Protocol": "Normalize controlled formatting and type variations; not return prediction"},
             {"Component": "Ground truth", "Protocol": "Canonicalized eligible input records captured before controlled corruption"},
             {"Component": "Rule-based system", "Protocol": "Explicit Python rules for numeric parsing, flags, case/whitespace and order-ID prefix"},
-            {"Component": "LLM system", "Protocol": f"Groq API model `{model_id}`, temperature 0, JSON-mode response"},
+            {"Component": "LLM system", "Protocol": f"xAI API model `{model_id}`, temperature 0, JSON-mode response"},
             {"Component": "Primary accuracy metrics", "Protocol": "Field-level exact-within-tolerance accuracy and complete-record accuracy"},
             {"Component": "Efficiency metrics", "Protocol": "Measured processing wall time, records/second, token count and reference-priced service-equivalent cost"},
             {"Component": "Scale tests", "Protocol": "Only sample sizes actually run (20, 50, 100); no linear extrapolation"},
