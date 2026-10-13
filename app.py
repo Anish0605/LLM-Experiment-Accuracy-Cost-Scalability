@@ -35,11 +35,12 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# xAI Grok 4.7 reference rates from xAI model documentation; verify before publication.
+# xAI Grok 4.3 standard short-context reference rates from official xAI pricing; verify before publication.
+# Standard rates: $1.25 / 1M input tokens and $2.50 / 1M output tokens.
 # Service-equivalent token cost is not necessarily the same as account billing.
-DEFAULT_MODEL_ID = "grok-4.7"
-DEFAULT_INPUT_USD_PER_MILLION = 2.00
-DEFAULT_OUTPUT_USD_PER_MILLION = 6.00
+DEFAULT_MODEL_ID = "grok-4.3"
+DEFAULT_INPUT_USD_PER_MILLION = 1.25
+DEFAULT_OUTPUT_USD_PER_MILLION = 2.50
 DATA_SOURCE_URL = "https://www.kaggle.com/competitions/retail-return-risk-modeling"
 DATASET_TITLE = "E-Commerce Returns: Who Will Send It Back?"
 APP_VERSION = "1.0.0"
