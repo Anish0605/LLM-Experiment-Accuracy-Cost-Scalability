@@ -128,6 +128,6 @@ These tests check that the rule-based transform restores the controlled formatti
 
 ## 8. ICITIIT 2027 submission reference
 
-Conference author instructions: <https://icitiit27.iiitkottayam.ac.in/instructions-to-authors/>.
+Conference author instructions: <https://icitiit27.iiitkottayam.ac.in/>.
 
 The official site has listed a 20 October 2026 submission deadline, a six-page review-paper limit including references, and an IEEE two-column format. These details may change, so confirm the current official instructions before submission. The repository is a reproducibility aid; it does not establish that the paper's experimental results are complete or that the paper will be accepted.
