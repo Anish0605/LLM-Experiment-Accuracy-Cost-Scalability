@@ -13,7 +13,12 @@ import os
 import re
 import time
 import uuid
+import subprocess
+import sys
+import tempfile
+import zipfile
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -57,25 +62,29 @@ DECIMAL_2_FIELDS = {"product_price", "discount_percent", "product_rating", "deli
 
 CSS = r"""
 <style>
-:root { --ink: #e9eef8; --muted: #a5b2c7; --gold: #eab330; --panel: #121d2e; --line: #2b3a51; }
-.block-container { max-width: 1480px; padding-top: 1.2rem; padding-bottom: 2.6rem; }
-[data-testid="stSidebar"] { background: linear-gradient(180deg, #101927 0%, #0c1421 100%); border-right: 1px solid #26354a; }
-.hero-panel { padding: 1.55rem 1.8rem; margin-bottom: 1.15rem; border-radius: 16px; border: 1px solid #2b3c55; border-left: 5px solid var(--gold); background: radial-gradient(circle at 90% 0%, rgba(234,179,48,.12), transparent 38%), linear-gradient(130deg, #16243a 0%, #0f1725 78%); }
-.hero-kicker { color: var(--gold); font-weight: 700; letter-spacing: .12em; font-size: .76rem; text-transform: uppercase; margin-bottom: .55rem; }
-.hero-panel h1 { color: #f4f7fc; font-size: clamp(1.6rem, 3vw, 2.35rem); line-height: 1.18; margin: 0 0 .55rem 0; }
-.hero-subtitle { color: #d1d9e7; font-size: 1.04rem; margin-bottom: .45rem; }
-.hero-detail { color: var(--muted); font-size: .84rem; margin-top: .7rem; }
-[data-testid="stMetric"] { background: linear-gradient(145deg, #16243a, #111b2b); border: 1px solid #2a3b53; border-top: 3px solid var(--gold); border-radius: 12px; padding: .95rem 1rem; min-height: 118px; }
-[data-testid="stMetricLabel"] p { color: #aab8cd !important; font-size: .83rem !important; }
-[data-testid="stMetricValue"] { color: #f4f7fc !important; }
-.stTabs [data-baseweb="tab-list"] { gap: .35rem; border-bottom: 1px solid #2b3a51; }
-.stTabs [data-baseweb="tab"] { border-radius: 9px 9px 0 0; padding: .65rem .95rem; }
-div[data-testid="stExpander"] { border: 1px solid #2a3b53; border-radius: 10px; }
-div.stButton > button[kind="primary"] { background: #eab330; color: #151a22; border: 1px solid #eab330; font-weight: 700; }
-div.stButton > button[kind="primary"]:hover { background: #f3c85e; border-color: #f3c85e; color: #151a22; }
-.small-muted { color: #a5b2c7; font-size: .84rem; }
-.section-label { color: var(--gold); text-transform: uppercase; letter-spacing: .09em; font-size: .75rem; font-weight: 700; }
-.status-card { background: #121d2e; border: 1px solid #2b3a51; border-radius: 10px; padding: .8rem 1rem; }
+:root { --ink:#243247; --muted:#5f6b7a; --gold:#eab330; --green:#276749; --line:#dbe2ea; }
+.block-container { max-width:1480px; padding-top:1.25rem; padding-bottom:2.6rem; }
+[data-testid="stAppViewContainer"] { background:#f7f8fa; color:var(--ink); }
+[data-testid="stHeader"] { background:rgba(247,248,250,.96); }
+[data-testid="stSidebar"] { background:#ffffff; border-right:1px solid var(--line); }
+[data-testid="stSidebar"] * { color:#243247; }
+.hero-panel { padding:1.45rem 1.7rem; margin-bottom:1.15rem; border-radius:12px; border:1px solid var(--line); border-left:5px solid var(--gold); background:#ffffff; box-shadow:0 2px 8px rgba(36,50,71,.04); }
+.hero-kicker { color:#8a6500; font-weight:750; letter-spacing:.09em; font-size:.76rem; text-transform:uppercase; margin-bottom:.55rem; }
+.hero-panel h1 { color:#172b4d; font-size:clamp(1.6rem,3vw,2.25rem); line-height:1.18; margin:0 0 .55rem 0; }
+.hero-subtitle { color:#334155; font-size:1.04rem; margin-bottom:.45rem; }
+.hero-detail { color:#5f6b7a; font-size:.86rem; margin-top:.7rem; }
+[data-testid="stMetric"] { background:#ffffff; border:1px solid var(--line); border-top:3px solid var(--gold); border-radius:10px; padding:.9rem 1rem; min-height:112px; box-shadow:0 1px 4px rgba(36,50,71,.03); }
+[data-testid="stMetricLabel"] p { color:#596579 !important; font-size:.84rem !important; }
+[data-testid="stMetricValue"] { color:#172b4d !important; }
+.stTabs [data-baseweb="tab-list"] { gap:.3rem; border-bottom:1px solid var(--line); }
+.stTabs [data-baseweb="tab"] { border-radius:7px 7px 0 0; padding:.6rem .8rem; }
+.stTabs [aria-selected="true"] { color:#1f6f50 !important; }
+div[data-testid="stExpander"] { border:1px solid var(--line); border-radius:9px; background:#ffffff; }
+div.stButton > button[kind="primary"] { background:#276749; color:#ffffff; border:1px solid #276749; font-weight:650; }
+div.stButton > button[kind="primary"]:hover { background:#1f553c; border-color:#1f553c; color:#ffffff; }
+.small-muted { color:#5f6b7a; font-size:.84rem; }
+.section-label { color:#8a6500; text-transform:uppercase; letter-spacing:.08em; font-size:.75rem; font-weight:750; }
+.status-card { background:#ffffff; border:1px solid var(--line); border-radius:9px; padding:.8rem 1rem; }
 </style>
 """
 
@@ -93,6 +102,72 @@ def get_setting(name: str, default: str = "") -> str:
 
 def get_api_key() -> str:
     return get_setting("GROQ_API_KEY", "")
+
+
+def kaggle_credentials_available() -> bool:
+    """Return True if Kaggle competition API credentials are configured."""
+    username = get_setting("KAGGLE_USERNAME", "")
+    key = get_setting("KAGGLE_KEY", "")
+    return bool(username and key)
+
+
+def download_kaggle_train_csv() -> tuple[bytes, str]:
+    """Download train.csv from the Kaggle competition using configured secrets.
+
+    The user must accept the competition rules on Kaggle before the API can access
+    competition files. Credentials are read from Streamlit Secrets/environment only.
+    """
+    username = get_setting("KAGGLE_USERNAME", "")
+    key = get_setting("KAGGLE_KEY", "")
+    if not username or not key:
+        raise RuntimeError(
+            "Kaggle API credentials are missing. Add KAGGLE_USERNAME and KAGGLE_KEY "
+            "to Streamlit App Settings → Secrets."
+        )
+
+    env = os.environ.copy()
+    env["KAGGLE_USERNAME"] = username
+    env["KAGGLE_KEY"] = key
+    with tempfile.TemporaryDirectory(prefix="icitiit_kaggle_") as tmp:
+        command = [
+            "kaggle", "competitions", "download",
+            "-c", "retail-return-risk-modeling", "-f", "train.csv", "-p", tmp,
+        ]
+        try:
+            result = subprocess.run(
+                command, env=env, capture_output=True, text=True, timeout=180, check=False
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("Kaggle download timed out after 180 seconds. Please retry.") from exc
+
+        if result.returncode != 0:
+            details = (result.stderr or result.stdout or "No details returned")[-1800:]
+            if "403" in details or "rules" in details.lower() or "accept" in details.lower():
+                raise RuntimeError(
+                    "Kaggle did not allow the download. Open the competition page while signed in, "
+                    "accept its rules/terms, then retry. API details: " + details
+                )
+            raise RuntimeError(
+                "Kaggle download failed. Check that KAGGLE_USERNAME/KAGGLE_KEY are correct "
+                "and the competition is accessible to your account. Details: " + details
+            )
+
+        candidates = list(Path(tmp).glob("*.zip"))
+        direct_csv = Path(tmp) / "train.csv"
+        if direct_csv.exists():
+            data = direct_csv.read_bytes()
+        elif candidates:
+            with zipfile.ZipFile(candidates[0]) as archive:
+                names = [n for n in archive.namelist() if Path(n).name.lower() == "train.csv"]
+                if not names:
+                    raise RuntimeError(
+                        "Kaggle download succeeded but the archive did not contain train.csv. "
+                        "Files found: " + ", ".join(archive.namelist()[:20])
+                    )
+                data = archive.read(names[0])
+        else:
+            raise RuntimeError("Kaggle command completed but no train.csv or ZIP archive was found.")
+        return data, "Kaggle API · retail-return-risk-modeling/train.csv"
 
 
 def init_state() -> None:
@@ -618,14 +693,34 @@ def main() -> None:
         st.caption("Upload `train.csv` only. Test and sample-submission files are not ETL ground truth.")
 
     st.markdown("<div class='section-label'>Dataset workspace</div>", unsafe_allow_html=True)
-    upload_col, source_col = st.columns([1.2, 1])
-    with upload_col:
-        uploaded = st.file_uploader("Upload Kaggle `train.csv`", type=["csv"], key="train_csv", help="Keep the CSV on your computer; it does not need to be committed to GitHub.")
+    source_col, upload_col = st.columns([1.05, 1])
     with source_col:
         st.markdown(
-            f"<div class='status-card'><b>Dataset source</b><br><a href='{DATA_SOURCE_URL}' target='_blank'>{DATASET_TITLE}</a><br><span class='small-muted'>Competition listing describes transaction-level records from 2022–2024. Real-world origin is not independently verified.</span></div>",
+            f"<div class='status-card'><b>Dataset source</b><br><a href='{DATA_SOURCE_URL}' target='_blank'>{DATASET_TITLE}</a><br><span class='small-muted'>The app retrieves train.csv directly through the Kaggle API. Competition access requires accepting the rules on Kaggle. The records' real-world origin is not independently verified.</span></div>",
             unsafe_allow_html=True,
         )
+        kaggle_ready = kaggle_credentials_available()
+        if kaggle_ready:
+            st.success("Kaggle API credentials configured in Streamlit Secrets.")
+        else:
+            st.info("For one-click download, add KAGGLE_USERNAME and KAGGLE_KEY in Streamlit Secrets.")
+        if st.button("Download train.csv from Kaggle", type="primary", disabled=not kaggle_ready, key="download_kaggle_train"):
+            with st.spinner("Connecting to Kaggle and downloading train.csv…"):
+                try:
+                    kaggle_bytes, kaggle_label = download_kaggle_train_csv()
+                    st.session_state["kaggle_train_bytes"] = kaggle_bytes
+                    st.session_state["kaggle_train_label"] = kaggle_label
+                    st.success(f"Downloaded train.csv ({len(kaggle_bytes):,} bytes).")
+                except Exception as exc:
+                    st.error(f"Kaggle download failed: {exc}")
+    with upload_col:
+        uploaded = st.file_uploader(
+            "Optional fallback: upload `train.csv` manually",
+            type=["csv"], key="train_csv",
+            help="Use this only if direct Kaggle API access is unavailable. Do not commit the CSV to GitHub.",
+        )
+        if st.session_state.get("kaggle_train_bytes"):
+            st.caption("Dataset loaded from Kaggle API. A manual upload, if provided, takes priority.")
 
     source_df: pd.DataFrame | None = None
     eligible_df: pd.DataFrame | None = None
@@ -634,9 +729,15 @@ def main() -> None:
     file_bytes: bytes | None = None
     schema_error: str | None = None
 
-    if uploaded is not None:
+    selected_filename = None
+    if uploaded is not None or st.session_state.get("kaggle_train_bytes"):
         try:
-            file_bytes = uploaded.getvalue()
+            if uploaded is not None:
+                file_bytes = uploaded.getvalue()
+                selected_filename = uploaded.name
+            else:
+                file_bytes = st.session_state["kaggle_train_bytes"]
+                selected_filename = "train.csv (Kaggle API)"
             fingerprint = hashlib.sha256(file_bytes).hexdigest()
             if st.session_state.source_fingerprint and st.session_state.source_fingerprint != fingerprint:
                 reset_benchmark()
@@ -648,7 +749,7 @@ def main() -> None:
             else:
                 eligible_df, eligibility_counts, eligibility_mask = eligibility_rules(source_df)
                 st.session_state.source_fingerprint = fingerprint
-                st.session_state.source_filename = uploaded.name
+                st.session_state.source_filename = selected_filename
                 st.session_state.source_row_count = int(len(source_df))
                 st.session_state.source_eligible_count = int(len(eligible_df))
                 st.session_state.source_columns = list(source_df.columns)
