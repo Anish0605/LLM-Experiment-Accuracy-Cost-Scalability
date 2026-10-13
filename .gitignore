@@ -7,3 +7,4 @@ venv/
 kaggle.json
 *.csv
 *.zip
+.streamlit/secrets.toml
