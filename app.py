@@ -43,7 +43,7 @@ DEFAULT_INPUT_USD_PER_MILLION = 1.25
 DEFAULT_OUTPUT_USD_PER_MILLION = 2.50
 DATA_SOURCE_URL = "https://www.kaggle.com/competitions/retail-return-risk-modeling"
 DATASET_TITLE = "E-Commerce Returns: Who Will Send It Back?"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 
 FIELDS = [
     "customer_age", "product_price", "discount_percent", "product_rating",
@@ -523,7 +523,7 @@ def build_result_summary() -> tuple[pd.DataFrame, pd.DataFrame]:
     calls: list[dict[str, Any]] = st.session_state.llm_calls
     keys = list(gold)
     summaries: list[dict[str, Any]] = []
-    for n in (20, 50, 100):
+    for n in (20, 50, 100, 250, 500):
         if n > len(keys) or not all(key in llm for key in keys[:n]):
             continue
         sample_keys = keys[:n]
@@ -812,7 +812,7 @@ def main() -> None:
             p1, p2 = st.columns([1.1, 1.4])
             with p1:
                 st.markdown("#### Build benchmark")
-                sample_size = st.selectbox("Records to sample", [20, 50, 100], index=2, key="sample_size")
+                sample_size = st.selectbox("Records to sample", [20, 50, 100, 250, 500], index=2, key="sample_size")
                 seed = st.number_input("Random seed", min_value=1, max_value=999999, value=int(st.session_state.seed), step=1, key="sample_seed")
                 st.caption("Use the same seed and pool for reproducibility. Building a new benchmark clears prior pipeline outputs.")
                 if st.button("Build / reset controlled benchmark", type="primary", use_container_width=True, disabled=len(eligible_df) < int(sample_size)):
@@ -886,11 +886,11 @@ def main() -> None:
                     st.success(f"API key detected · model `{model_id}`")
                 else:
                     st.warning("Configure `XAI_API_KEY` in Streamlit Secrets before calling the model.")
-                target_options = [n for n in (20, 50, 100) if n <= len(keys)]
+                target_options = [n for n in (20, 50, 100, 250, 500) if n <= len(keys)]
                 default_target = min(20, len(keys))
                 target_n = st.select_slider("Run LLM for the first N records", options=target_options, value=default_target, key="llm_target_n")
                 batch_size = st.selectbox("Records per API request", [1, 5], index=1, key="llm_batch_size")
-                st.caption("Run 20 first, then increase to 50 and 100. The app saves responses in the active Streamlit session; download the audit export after each important run.")
+                st.caption("For a new benchmark, run 20 first, then extend to 50, 100, 250 and 500 without rebuilding. The app saves successful responses in the active Streamlit session; export audit files after important runs and keep backups privately.")
                 if st.button("Run / extend LLM experiment", type="primary", use_container_width=True, disabled=not bool(api_key)):
                     try:
                         client = OpenAI(api_key=api_key, base_url="https://api.x.ai/v1")
@@ -920,7 +920,12 @@ def main() -> None:
                                 st.session_state.llm_calls.append(meta)
                                 for key in batch_keys:
                                     output = output_map.get(key, {})
-                                    st.session_state.llm_outputs[key] = output
+                                    # Persist only actual returned records. If a response omits
+                                    # a row, leave it eligible for retry on the next Run / extend.
+                                    if isinstance(output, dict) and output:
+                                        st.session_state.llm_outputs[key] = output
+                                    else:
+                                        st.session_state.llm_outputs.pop(key, None)
                                     st.session_state.llm_meta_by_key[key] = meta
                                 status.write(f"Batch {batch_index}/{len(batches)} · requested {len(batch_keys)} records · returned {sum(bool(output_map.get(k)) for k in batch_keys)} record objects")
                                 progress.progress(batch_index / len(batches))
@@ -951,7 +956,7 @@ def main() -> None:
         else:
             summary_df, field_df = build_result_summary()
             if summary_df.empty:
-                st.info("Run an LLM sample of 20, 50 or 100 records to build comparable result rows.")
+                st.info("Run an LLM sample of 20, 50, 100, 250 or 500 records to build comparable result rows.")
             else:
                 completed_sizes = sorted(summary_df["sample_size"].unique())
                 largest_n = int(max(completed_sizes))
@@ -1066,7 +1071,7 @@ def main() -> None:
             {"Component": "LLM system", "Protocol": f"xAI API model `{model_id}`, temperature 0, JSON-mode response"},
             {"Component": "Primary accuracy metrics", "Protocol": "Field-level exact-within-tolerance accuracy and complete-record accuracy"},
             {"Component": "Efficiency metrics", "Protocol": "Measured processing wall time, records/second, token count and reference-priced service-equivalent cost"},
-            {"Component": "Scale tests", "Protocol": "Only sample sizes actually run (20, 50, 100); no linear extrapolation"},
+            {"Component": "Scale tests", "Protocol": "Only sample sizes actually run (20, 50, 100, 250, 500); no linear extrapolation"},
         ]
         st.dataframe(pd.DataFrame(protocol_rows), use_container_width=True, hide_index=True)
         st.markdown("#### Limitations to state in the paper")
